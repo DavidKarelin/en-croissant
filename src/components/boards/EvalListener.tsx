@@ -1,4 +1,4 @@
-import { events, type EngineOptions, type GoMode } from "@/bindings";
+import { events, type EngineOptions, type GoMode, type BestMoves, type Score } from "@/bindings";
 import {
   activeTabAtom,
   currentThreatAtom,
@@ -6,6 +6,7 @@ import {
   engineProgressFamily,
   enginesAtom,
   tabEngineSettingsFamily,
+  liveAnnotationsAtom,
 } from "@/state/atoms";
 import { getVariationLine } from "@/utils/chess";
 import { getBestMoves as chessdbGetBestMoves } from "@/utils/chessdb/api";
@@ -17,16 +18,20 @@ import {
   stopEngine,
 } from "@/utils/engines";
 import { getBestMoves as lichessGetBestMoves } from "@/utils/lichess/api";
+import { getAnnotation } from "@/utils/score";
 import { useThrottledEffect } from "@/utils/misc";
 import { parseUci } from "chessops";
+import { makeUci } from "chessops";
 import { INITIAL_FEN, makeFen } from "chessops/fen";
 import equal from "fast-deep-equal";
+import { produce } from "immer";
 import { useAtom, useAtomValue } from "jotai";
-import { startTransition, useContext, useEffect, useMemo } from "react";
+import { startTransition, useContext, useEffect, useMemo, useCallback, useRef } from "react";
 import { match } from "ts-pattern";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { TreeStateContext } from "../common/TreeStateContext";
+import { getNodeAtPath } from "@/utils/treeReducer";
 
 function EvalListener() {
   const [engines] = useAtom(enginesAtom);
@@ -109,6 +114,7 @@ function EngineListener({
 }) {
   const store = useContext(TreeStateContext)!;
   const setScore = useStore(store, (s) => s.setScore);
+  const liveAnnotations = useAtomValue(liveAnnotationsAtom);
   const activeTab = useAtomValue(activeTabAtom);
 
   const [, setProgress] = useAtom(
@@ -118,6 +124,10 @@ function EngineListener({
   const [, setEngineVariation] = useAtom(
     engineMovesFamily({ engine: engine.name, tab: activeTab! }),
   );
+
+  const engineMoveCache = useAtomValue(
+    engineMovesFamily({ engine: engine.name, tab: activeTab! }),
+  );
   const [settings] = useAtom(
     tabEngineSettingsFamily({
       engineName: engine.name,
@@ -125,6 +135,135 @@ function EngineListener({
       defaultGo: engine.go ?? undefined,
       tab: activeTab!,
     }),
+  );
+  const pendingNextScores = useRef(new Set<string>());
+
+  const getBestMoves = useMemo(
+    () =>
+      match(engine.type)
+        .with(
+          "local",
+          () => (fen: string, goMode: GoMode, options: EngineOptions) =>
+            localGetBestMoves(engine as LocalEngine, fen, goMode, options),
+        )
+        .with("chessdb", () => chessdbGetBestMoves)
+        .with("lichess", () => lichessGetBestMoves)
+        .exhaustive(),
+    [engine.type, engine],
+  );
+  const buildEngineOptions = useMemo(() => {
+    const options =
+      settings.settings?.map((s) => ({
+        name: s.name,
+        value: s.value?.toString() || "",
+      })) ?? [];
+    if (chess960 && !options.find((o) => o.name === "UCI_Chess960")) {
+      options.push({ name: "UCI_Chess960", value: "true" });
+    }
+    return options;
+  }, [chess960, settings.settings]);
+
+  const annotateNextMove = useCallback(
+    async (currentBestMoves: BestMoves[]) => {
+      if (
+        !liveAnnotations ||
+        threat ||
+        currentBestMoves.length === 0 ||
+        !activeTab ||
+        isGameOver
+      ) {
+        return;
+      }
+
+      const state = store.getState();
+      const currentPath = state.position;
+      if (currentPath.length === 0) return;
+
+      const currentNode = getNodeAtPath(state.root, currentPath);
+      if (!currentNode || currentNode.children.length === 0) return;
+
+      const parentNode =
+        currentPath.length > 0
+          ? getNodeAtPath(state.root, currentPath.slice(0, -1))
+          : undefined;
+
+      const nextNode = currentNode.children[0];
+      if (!nextNode.move) return;
+
+      const prevprevScore = parentNode?.score?.value ?? null;
+      const prevScore = currentBestMoves[0].score.value;
+
+      const nextMoveUci = makeUci(nextNode.move);
+      const nextMoves = [...searchingMoves, nextMoveUci];
+      const nextKey = `${searchingFen}:${nextMoves.join(",")}`;
+
+      let nextScore: Score | null = nextNode.score;
+      const cachedNext = engineMoveCache.get(nextKey)?.[0];
+      if (!nextScore && cachedNext) {
+        nextScore = cachedNext.score;
+      }
+
+      if (!nextScore && !pendingNextScores.current.has(nextKey)) {
+        pendingNextScores.current.add(nextKey);
+        try {
+          const moves = await getBestMoves(activeTab, { t: "Time", c: 1000 }, {
+            moves: nextMoves,
+            fen: searchingFen,
+            extraOptions: buildEngineOptions,
+          });
+          if (moves) {
+            const [, bestMoves] = moves;
+            if (bestMoves[0]) {
+              nextScore = bestMoves[0].score;
+              setEngineVariation((prev) => {
+                const newMap = new Map(prev);
+                newMap.set(nextKey, bestMoves);
+                return newMap;
+              });
+            }
+          }
+        } finally {
+          pendingNextScores.current.delete(nextKey);
+        }
+      }
+
+      if (!nextScore) return;
+
+      const annotation = getAnnotation(
+        prevprevScore,
+        prevScore,
+        nextScore.value,
+        nextNode.halfMoves % 2 === 1 ? "white" : "black",
+        currentBestMoves,
+        false,
+        nextNode.san || "",
+      );
+
+      store.setState(
+        produce((state) => {
+          const node = getNodeAtPath(state.root, [...currentPath, 0]);
+          if (!node) return;
+          state.dirty = true;
+          node.score = nextScore;
+          if (annotation && !node.annotations.includes(annotation)) {
+            node.annotations = [...new Set([...node.annotations, annotation])];
+          }
+        }),
+      );
+    },
+    [
+      activeTab,
+      buildEngineOptions,
+      engineMoveCache,
+      getBestMoves,
+      isGameOver,
+      liveAnnotations,
+      searchingFen,
+      JSON.stringify(searchingMoves),
+      setEngineVariation,
+      store,
+      threat,
+    ],
   );
   useEffect(() => {
     if (!settings.enabled) return;
@@ -152,6 +291,9 @@ function EngineListener({
           setProgress(payload.progress);
           setScore(ev[0].score);
         });
+        if (!threat) {
+          void annotateNextMove(ev);
+        }
       }
     });
     return () => {
@@ -166,21 +308,12 @@ function EngineListener({
     JSON.stringify(searchingMoves),
     engine.name,
     setEngineVariation,
+    annotateNextMove,
+    threat,
+    finalFen,
+    fen,
+    JSON.stringify(moves),
   ]);
-
-  const getBestMoves = useMemo(
-    () =>
-      match(engine.type)
-        .with(
-          "local",
-          () => (fen: string, goMode: GoMode, options: EngineOptions) =>
-            localGetBestMoves(engine as LocalEngine, fen, goMode, options),
-        )
-        .with("chessdb", () => chessdbGetBestMoves)
-        .with("lichess", () => lichessGetBestMoves)
-        .exhaustive(),
-    [engine.type, engine],
-  );
 
   useThrottledEffect(
     () => {
@@ -190,18 +323,10 @@ function EngineListener({
             stopEngine(engine, activeTab!);
           }
         } else {
-          const options =
-            settings.settings?.map((s) => ({
-              name: s.name,
-              value: s.value?.toString() || "",
-            })) ?? [];
-          if (chess960 && !options.find((o) => o.name === "UCI_Chess960")) {
-            options.push({ name: "UCI_Chess960", value: "true" });
-          }
           getBestMoves(activeTab!, settings.go, {
             moves: searchingMoves,
             fen: searchingFen,
-            extraOptions: options,
+            extraOptions: buildEngineOptions,
           }).then((moves) => {
             if (moves) {
               const [progress, bestMoves] = moves;
@@ -226,7 +351,6 @@ function EngineListener({
     50,
     [
       settings.enabled,
-      JSON.stringify(settings.settings),
       settings.go,
       searchingFen,
       JSON.stringify(searchingMoves),
@@ -235,6 +359,7 @@ function EngineListener({
       getBestMoves,
       setEngineVariation,
       engine,
+      buildEngineOptions,
     ],
   );
   return null;

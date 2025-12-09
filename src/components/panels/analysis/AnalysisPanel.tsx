@@ -7,6 +7,7 @@ import {
   enableAllAtom,
   engineMovesFamily,
   enginesAtom,
+  liveAnnotationsAtom,
 } from "@/state/atoms";
 import { getVariationLine } from "@/utils/chess";
 import { getPiecesCount, hasCaptures, positionFromFen } from "@/utils/chessops";
@@ -23,6 +24,7 @@ import {
   ScrollArea,
   Space,
   Stack,
+  Switch,
   Tabs,
   Text,
 } from "@mantine/core";
@@ -78,6 +80,7 @@ function AnalysisPanel() {
 
   const [tab, setTab] = useAtom(currentAnalysisTabAtom);
   const [expanded, setExpanded] = useAtom(currentExpandedEnginesAtom);
+  const [liveAnnotations, setLiveAnnotations] = useAtom(liveAnnotationsAtom);
 
   const [pos] = positionFromFen(currentNodeFen);
   const navigate = useNavigate();
@@ -124,6 +127,16 @@ function AnalysisPanel() {
                   <Space h="sm" />
                 </>
               )}
+          <Paper withBorder p="xs">
+              <Switch
+                label={t("Board.Analysis.LiveAnnotations")}
+                description={t("Board.Analysis.LiveAnnotations.Desc")}
+                checked={liveAnnotations}
+                onChange={(event) =>
+                  setLiveAnnotations(event.currentTarget.checked)
+                }
+              />
+            </Paper>
             {loadedEngines.length > 1 && (
               <Paper withBorder p="xs" flex={1}>
                 <Group w="100%">

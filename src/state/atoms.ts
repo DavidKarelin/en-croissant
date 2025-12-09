@@ -158,6 +158,10 @@ export const showCoordinatesAtom = atomWithStorage<boolean>(
     getOnInit: true,
   },
 );
+export const liveAnnotationsAtom = atomWithStorage<boolean>(
+  "live-annotations",
+  false,
+);
 export const soundCollectionAtom = atomWithStorage<string>(
   "sound-collection",
   "standard",

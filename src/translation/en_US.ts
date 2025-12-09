@@ -186,6 +186,9 @@ export const en_US = {
     "Board.Analysis.AnnotateNovelties": "Annotate Novelties",
     "Board.Analysis.AnnotateNovelties.Desc":
       "Add a comment to the first position that is not in the reference database.",
+    "Board.Analysis.LiveAnnotations": "Live annotations",
+    "Board.Analysis.LiveAnnotations.Desc":
+      "Automatically add annotations while engines are running.",
     "Board.Analysis.Analyze": "Analyze",
     "Board.Analysis.Advantage": "Advantage",
     "Board.Analysis.Accuracy": "Accuracy",
