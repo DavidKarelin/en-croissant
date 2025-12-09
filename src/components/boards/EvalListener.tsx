@@ -163,108 +163,219 @@ function EngineListener({
     return options;
   }, [chess960, settings.settings]);
 
-  const annotateNextMove = useCallback(
-    async (currentBestMoves: BestMoves[]) => {
-      if (
-        !liveAnnotations ||
-        threat ||
-        currentBestMoves.length === 0 ||
-        !activeTab ||
-        isGameOver
-      ) {
-        return;
-      }
+  const annotateCurrentMove = useCallback(
+  async (currentBestMoves: BestMoves[]) => {
+    if (
+      !liveAnnotations ||
+      threat ||
+      currentBestMoves.length === 0 ||
+      !activeTab ||
+      isGameOver
+    ) {
+      return;
+    }
 
-      const state = store.getState();
-      const currentPath = state.position;
-      if (currentPath.length === 0) return;
+    const state = store.getState();
+    const currentPath = state.position;
 
-      const currentNode = getNodeAtPath(state.root, currentPath);
-      if (!currentNode || currentNode.children.length === 0) return;
+    // Root has no move to annotate
+    if (currentPath.length === 0) return;
 
-      const parentNode =
-        currentPath.length > 0
-          ? getNodeAtPath(state.root, currentPath.slice(0, -1))
-          : undefined;
+    const currentNode = getNodeAtPath(state.root, currentPath);
+    if (!currentNode || !currentNode.move) return;
 
-      const nextNode = currentNode.children[0];
-      if (!nextNode.move) return;
+    const parentNode =
+      currentPath.length > 0
+        ? getNodeAtPath(state.root, currentPath.slice(0, -1))
+        : undefined;
 
-      const prevprevScore = parentNode?.score?.value ?? null;
-      const prevScore = currentBestMoves[0].score.value;
+    const prevprevNode =
+      currentPath.length > 1
+        ? getNodeAtPath(state.root, currentPath.slice(0, -2))
+        : undefined;
 
-      const nextMoveUci = makeUci(nextNode.move);
+    // "last two moves" scores (already exist on nodes if previously analyzed)
+    const prevprevScore = prevprevNode?.score?.value ?? null;
+    const prevScore = parentNode?.score?.value ?? null;
+
+    // current move score comes from the live engine payload
+    const currentScoreObj = currentBestMoves[0]?.score ?? null;
+
+    // --- KEY FIX #1: Use best-moves from the PARENT position if available ---
+    // This is the position where the annotated move was actually chosen.
+    const parentMovesList =
+      searchingMoves.length > 0 ? searchingMoves.slice(0, -1) : [];
+
+    const parentKey = `${searchingFen}:${parentMovesList.join(",")}`;
+    const cachedParent = engineMoveCache.get(parentKey);
+
+    // Fallback to currentBestMoves if we don't have parent multipv yet.
+    const annotationPrevMoves =
+      cachedParent && cachedParent.length > 0 ? cachedParent : currentBestMoves;
+
+    // Next move info (mainline child) if it exists
+    const nextNode = currentNode.children[0];
+    const nextMoveUci = nextNode?.move ? makeUci(nextNode.move) : null;
+
+    let nextScore: Score | null = nextNode?.score ?? null;
+    let nextKey: string | null = null;
+
+    if (nextMoveUci) {
       const nextMoves = [...searchingMoves, nextMoveUci];
-      const nextKey = `${searchingFen}:${nextMoves.join(",")}`;
+      nextKey = `${searchingFen}:${nextMoves.join(",")}`;
 
-      let nextScore: Score | null = nextNode.score;
       const cachedNext = engineMoveCache.get(nextKey)?.[0];
       if (!nextScore && cachedNext) {
         nextScore = cachedNext.score;
       }
+    }
 
-      if (!nextScore && !pendingNextScores.current.has(nextKey)) {
-        pendingNextScores.current.add(nextKey);
-        try {
-          const moves = await getBestMoves(activeTab, { t: "Time", c: 1000 }, {
-            moves: nextMoves,
-            fen: searchingFen,
-            extraOptions: buildEngineOptions,
-          });
-          if (moves) {
-            const [, bestMoves] = moves;
-            if (bestMoves[0]) {
-              nextScore = bestMoves[0].score;
-              setEngineVariation((prev) => {
-                const newMap = new Map(prev);
-                newMap.set(nextKey, bestMoves);
-                return newMap;
-              });
-            }
-          }
-        } finally {
-          pendingNextScores.current.delete(nextKey);
+    // --- KEY FIX #2: compute nextScoreValue AFTER cache fill ---
+    const nextScoreValue =
+      nextScore?.value ??
+      currentScoreObj?.value ??
+      currentBestMoves[0].score.value;
+
+    // Helper: ensure only ONE "basic" annotation lives on a node at a time.
+    const BASIC = new Set<string>(["!!", "!", "!?", "?!", "?", "??"]);
+
+    const applyBasicAnnotation = (node: any, ann: string) => {
+      const existing: string[] = Array.isArray(node.annotations)
+        ? node.annotations
+        : [];
+
+      const withoutBasic = existing.filter((a) => !BASIC.has(a));
+
+      node.annotations =
+        ann && BASIC.has(ann) ? [...withoutBasic, ann] : withoutBasic;
+    };
+
+    const isSacrifice =
+    (currentNode as any).is_sacrifice ??
+    (currentNode as any).isSacrifice ??
+    false;
+
+    // 1) Generate an annotation immediately
+    // --- KEY FIX #3: pass annotationPrevMoves instead of currentBestMoves ---
+    const initialAnnotation = getAnnotation(
+    prevprevScore,
+    prevScore,
+    nextScoreValue,
+    currentNode.halfMoves % 2 === 1 ? "white" : "black",
+    annotationPrevMoves,
+    isSacrifice,
+    currentNode.san || "",
+  );
+
+    store.setState(
+      produce((state) => {
+        const node = getNodeAtPath(state.root, currentPath);
+        if (!node) return;
+
+        state.dirty = true;
+
+        // Persist the live eval onto the current node as it updates
+        if (currentScoreObj) {
+          node.score = currentScoreObj;
         }
-      }
 
-      if (!nextScore) return;
+        applyBasicAnnotation(node, initialAnnotation);
+      }),
+    );
 
-      const annotation = getAnnotation(
-        prevprevScore,
-        prevScore,
-        nextScore.value,
-        nextNode.halfMoves % 2 === 1 ? "white" : "black",
-        currentBestMoves,
-        false,
-        nextNode.san || "",
+    // 2) If we don't have a nextScore yet, do a lightweight 1s probe
+    if (!nextKey || !nextMoveUci) return;
+    if (nextScore) return;
+    if (pendingNextScores.current.has(nextKey)) return;
+
+    pendingNextScores.current.add(nextKey);
+
+    try {
+      const nextMoves = [...searchingMoves, nextMoveUci];
+
+      const nextEvalOptions = (() => {
+        const withoutThreads = buildEngineOptions.filter(
+          (o) => o.name !== "Threads",
+        );
+        return [...withoutThreads, { name: "Threads", value: "1" }];
+      })();
+
+      // Use a separate engine process for local next-move probing.
+      // This prevents the 1s "next" search from stopping the main live search.
+      const probeTab =
+        engine.type === "local"
+          ? `${activeTab}::live-next-probe::${engine.name}`
+          : activeTab;
+
+      const moves = await getBestMoves(
+        probeTab,
+        { t: "Time", c: 1000 },
+        {
+          moves: nextMoves,
+          fen: searchingFen,
+          extraOptions: nextEvalOptions,
+        },
       );
+
+      if (!moves) return;
+
+      const [, bestMoves] = moves;
+      const best = bestMoves[0];
+      if (!best) return;
+
+      nextScore = best.score;
+
+      // Cache the 1s probe result
+      setEngineVariation((prev) => {
+        const newMap = new Map(prev);
+        newMap.set(nextKey!, bestMoves);
+        return newMap;
+      });
+
+      const updatedAnnotation = getAnnotation(
+      prevprevScore,
+      prevScore,
+      nextScore.value,
+      currentNode.halfMoves % 2 === 1 ? "white" : "black",
+      annotationPrevMoves,
+      isSacrifice,
+      currentNode.san || "",
+    );
 
       store.setState(
         produce((state) => {
-          const node = getNodeAtPath(state.root, [...currentPath, 0]);
+          const node = getNodeAtPath(state.root, currentPath);
           if (!node) return;
+
           state.dirty = true;
-          node.score = nextScore;
-          if (annotation && !node.annotations.includes(annotation)) {
-            node.annotations = [...new Set([...node.annotations, annotation])];
+
+          if (currentScoreObj) {
+            node.score = currentScoreObj;
           }
+
+          applyBasicAnnotation(node, updatedAnnotation);
         }),
       );
-    },
-    [
-      activeTab,
-      buildEngineOptions,
-      engineMoveCache,
-      getBestMoves,
-      isGameOver,
-      liveAnnotations,
-      searchingFen,
-      JSON.stringify(searchingMoves),
-      setEngineVariation,
-      store,
-      threat,
-    ],
-  );
+    } finally {
+      pendingNextScores.current.delete(nextKey);
+    }
+  },
+  [
+    activeTab,
+    buildEngineOptions,
+    engineMoveCache,
+    getBestMoves,
+    isGameOver,
+    liveAnnotations,
+    searchingFen,
+    JSON.stringify(searchingMoves),
+    setEngineVariation,
+    store,
+    threat,
+    engine.name,
+    engine.type,
+  ],
+);
   useEffect(() => {
     if (!settings.enabled) return;
     const unlisten = events.bestMovesPayload.listen(({ payload }) => {
@@ -292,7 +403,7 @@ function EngineListener({
           setScore(ev[0].score);
         });
         if (!threat) {
-          void annotateNextMove(ev);
+          void annotateCurrentMove(ev);
         }
       }
     });
@@ -308,7 +419,7 @@ function EngineListener({
     JSON.stringify(searchingMoves),
     engine.name,
     setEngineVariation,
-    annotateNextMove,
+    annotateCurrentMove,
     threat,
     finalFen,
     fen,
