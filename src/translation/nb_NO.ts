@@ -176,6 +176,8 @@ export const nb_NO = {
     "Board.Analysis.AnnotateNovelties": "Kommenter nye trekk",
     "Board.Analysis.AnnotateNovelties.Desc":
       "Legger til en kommentar for den første stillingen som ikke er i referansedatabasen.",
+    "Board.Analysis.LiveAnnotations": "Live annotations",
+    "Board.Analysis.LiveAnnotations.Desc": "Automatically add annotations while engines are running.",
     "Board.Analysis.Analyze": "Analyser",
     "Board.Analysis.Advantage": "Fordel",
     "Board.Analysis.Accuracy": "Presisjon",

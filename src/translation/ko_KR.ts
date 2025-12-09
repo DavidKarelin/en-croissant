@@ -185,6 +185,8 @@ export const ko_KR = {
     "Board.Analysis.AnnotateNovelties": "신수 주석",
     "Board.Analysis.AnnotateNovelties.Desc":
       "참조 데이터베이스에 없는 첫 번째 포지션에 주석을 추가합니다.",
+    "Board.Analysis.LiveAnnotations": "Live annotations",
+    "Board.Analysis.LiveAnnotations.Desc": "Automatically add annotations while engines are running.",
     "Board.Analysis.Analyze": "분석",
     "Board.Analysis.Advantage": "유리",
     "Board.Analysis.Accuracy": "정확도",

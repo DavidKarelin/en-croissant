@@ -176,6 +176,8 @@ export const de_DE = {
     "Board.Analysis.AnnotateNovelties": "Neuerungen kommentieren",
     "Board.Analysis.AnnotateNovelties.Desc":
       "Füge dem ersten Zug, der nicht in der Referenzdatenbank ist, einen Kommentar hinzu.",
+    "Board.Analysis.LiveAnnotations": "Live annotations",
+    "Board.Analysis.LiveAnnotations.Desc": "Automatically add annotations while engines are running.",
     "Board.Analysis.Analyze": "Analysieren",
     "Board.Analysis.Advantage": "Vorteil",
     "Board.Analysis.Accuracy": "Genauigkeit",

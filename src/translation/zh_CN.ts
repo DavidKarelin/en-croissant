@@ -175,6 +175,8 @@ export const zh_CN = {
     "Board.Analysis.AnnotateNovelties": "评注新奇着法",
     "Board.Analysis.AnnotateNovelties.Desc":
       "在不在参考数据库中的第一个着法上添加注释",
+    "Board.Analysis.LiveAnnotations": "Live annotations",
+    "Board.Analysis.LiveAnnotations.Desc": "Automatically add annotations while engines are running.",
     "Board.Analysis.Analyze": "分析",
     "Board.Analysis.Advantage": "优势",
     "Board.Analysis.Accuracy": "精度",

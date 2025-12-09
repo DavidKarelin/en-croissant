@@ -186,6 +186,8 @@ export const ru_RU = {
     "Board.Analysis.AnnotateNovelties": "Аннотировать новинки",
     "Board.Analysis.AnnotateNovelties.Desc":
       "Добавить комментарий в первой позиции, которая отсутствует в базе данных.",
+    "Board.Analysis.LiveAnnotations": "Live annotations",
+    "Board.Analysis.LiveAnnotations.Desc": "Automatically add annotations while engines are running.",
     "Board.Analysis.Analyze": "Анализировать",
     "Board.Analysis.Advantage": "Преимущество",
     "Board.Analysis.Accuracy": "Точность",

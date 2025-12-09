@@ -176,6 +176,8 @@ export const tr_TR = {
     "Board.Analysis.AnnotateNovelties": "Yenilikleri İşaretle",
     "Board.Analysis.AnnotateNovelties.Desc":
       "Referans veritabanında bulunmayan ilk pozisyona not ekler.",
+    "Board.Analysis.LiveAnnotations": "Live annotations",
+    "Board.Analysis.LiveAnnotations.Desc": "Automatically add annotations while engines are running.",
     "Board.Analysis.Analyze": "Analiz",
     "Board.Analysis.Advantage": "Avantaj",
     "Board.Analysis.Accuracy": "Doğruluk",

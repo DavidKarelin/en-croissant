@@ -175,6 +175,8 @@ export const be_BY = {
     "Board.Analysis.AnnotateNovelties": "Анатаваць навінкі",
     "Board.Analysis.AnnotateNovelties.Desc":
       "Дадаць каментарый да першай пазіцыі, якой няма ў базе дадзеных.",
+    "Board.Analysis.LiveAnnotations": "Live annotations",
+    "Board.Analysis.LiveAnnotations.Desc": "Automatically add annotations while engines are running.",
     "Board.Analysis.Analyze": "Аналізаваць",
     "Board.Analysis.Advantage": "Перавага",
     "Board.Analysis.Accuracy": "Дакладнасць",
